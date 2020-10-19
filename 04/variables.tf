@@ -55,23 +55,25 @@ variable "rds_instance"{
     default={
         "multi_az"=false
         "storage"=20
-        "identifier"= "csye6225-f20"
+        "identifier"="csye6225-f20"
         "engine"="mysql"
         "engine_version"="5.7"
-        "instance_class"= "db.t3.micro"
-        "dbname"= "csye6225"
-        "username"= "csye6225fall2020"
-        "password"= "Test@1234"
+        "instance_class"="db.t3.micro"
+        "dbname"="csye6225"
+        "username"="csye6225fall2020"
+        "password"="Test1234"
+        "skip_final_snapshot"=true
     }
 }
 variable "ec2_instance"{
     type=map
     default={
-        "ami"="abc"
+        "ami"="ami-09d74e34010fb66a2"
         "delete_on_termination" =true
         "instance_type"="t2.micro"
         "volume_size"=20
         "volume_type"="gp2"
+        "key_name"="csye6225-dev"
     }
 }
 variable "dynamoDB"{

@@ -125,7 +125,7 @@ resource "aws_security_group" "database" {
     to_port     = var.mysql_port
     protocol    = "tcp"
     security_groups=[
-      aws_security_group.application.name
+      aws_security_group.application.id
     ]
   }
   
@@ -183,7 +183,8 @@ resource "aws_db_instance" "rds" {
   username             = var.rds_instance["username"]
   password             = var.rds_instance["password"]
   db_subnet_group_name = aws_db_subnet_group.db_subnet_grp.id
-  security_group_names = [aws_security_group.database.name]
+  vpc_security_group_ids = [aws_security_group.database.id]
+  skip_final_snapshot  = var.rds_instance["skip_final_snapshot"]
 }
 data "template_file" "cloud_init" {
   template = file("${path.module}/cloudconfig.yml")
@@ -194,19 +195,22 @@ data "template_file" "cloud_init" {
 resource "aws_instance" "web" {
   ami                  = var.ec2_instance["ami"]
   instance_type        = var.ec2_instance["instance_type"]
+  key_name             = var.ec2_instance["key_name"]
   root_block_device {
     volume_size   = var.ec2_instance["volume_size"]
     delete_on_termination= var.ec2_instance["delete_on_termination"]
     volume_type   = var.ec2_instance["volume_type"]
   }
-  vpc_security_group_ids = [aws_security_group.application.name]
+  vpc_security_group_ids = [aws_security_group.application.id]
   subnet_id              = aws_subnet.sb3.id
   user_data              = data.template_file.cloud_init.rendered
-  iam_instance_profile   = aws_iam_role.ec2_instance_role.name
+  iam_instance_profile   = aws_iam_instance_profile.ec2_instance_profile.name
 }
 resource "aws_dynamodb_table" "dynamoDB"{
   name       = var.dynamoDB["name"]
   hash_key   = var.dynamoDB["hash_key"]
+  write_capacity = 2
+  read_capacity  = 2
   attribute {
     name = var.dynamoDB["hash_key"]
     type = var.dynamoDB["hash_key_type"]
@@ -264,4 +268,8 @@ EOF
 resource "aws_iam_role_policy_attachment" "ec2_s3_attachment" {
   role       = aws_iam_role.ec2_instance_role.name
   policy_arn = aws_iam_policy.s3_iam_policy.arn
+}
+resource "aws_iam_instance_profile" "ec2_instance_profile" {
+  name = "ec2_instance_profile"
+  role = aws_iam_role.ec2_instance_role.name
 }
