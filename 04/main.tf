@@ -10,6 +10,7 @@ terraform {
 provider "aws" {
   region  = var.region
 }
+variable "ami_id"{}
 resource "aws_vpc" "vpc"{
   cidr_block = var.vpc_cidr
   enable_dns_hostnames = true
@@ -193,7 +194,7 @@ data "template_file" "cloud_init" {
   }
 }
 resource "aws_instance" "web" {
-  ami                  = var.ec2_instance["ami"]
+  ami                  = var.ami_id
   instance_type        = var.ec2_instance["instance_type"]
   key_name             = var.ec2_instance["key_name"]
   root_block_device {
@@ -226,16 +227,10 @@ resource "aws_iam_policy" "s3_iam_policy" {
     "Statement": [
         {
             "Action": [
-              "s3:CreateBucket",
-              "s3:DeleteBucket",
               "s3:DeleteObject",
               "s3:DeleteObjectVersion",
-              "s3:GetLifecycleConfiguration",
               "s3:GetObject",
               "s3:GetObjectVersion",
-              "s3:PutBucketAcl",
-              "s3:PutEncryptionConfiguration",
-              "s3:PutLifecycleConfiguration",
               "s3:PutObject"
             ],
             "Effect": "Allow",
