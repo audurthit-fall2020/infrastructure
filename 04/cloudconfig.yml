@@ -1,0 +1,11 @@
+#cloud-config
+write_files:
+  - path: /etc/environment
+    content: |
+      export DB_USERNAME="csye6225fall2020"
+      export DB_PASSWORD="Test1234"
+      export DB_HOST=${rds_hostname}
+      export s3_bucket_name="webapp.trivedh.audurthi"
+      export DB_PORT="3306"
+      export DATABASE="csye6225"
+    append: true
