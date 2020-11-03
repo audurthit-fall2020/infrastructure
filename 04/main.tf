@@ -9,8 +9,11 @@ terraform {
 
 provider "aws" {
   region  = var.region
+  profile = var.profile
 }
 variable "ami_id"{}
+variable "account_id"{}
+variable "profile"{}
 resource "aws_vpc" "vpc"{
   cidr_block = var.vpc_cidr
   enable_dns_hostnames = true
@@ -206,6 +209,9 @@ resource "aws_instance" "web" {
   subnet_id              = aws_subnet.sb3.id
   user_data              = data.template_file.cloud_init.rendered
   iam_instance_profile   = aws_iam_instance_profile.ec2_instance_profile.name
+  tags = {
+    Name = "dev"
+  }
 }
 resource "aws_dynamodb_table" "dynamoDB"{
   name       = var.dynamoDB["name"]
@@ -243,6 +249,29 @@ resource "aws_iam_policy" "s3_iam_policy" {
 }
 EOF
 }
+resource "aws_iam_policy" "codedeploy_agent_policy_ec2" {
+  name        = "CodeDeploy-EC2-S3"
+  description = "EC2 policy to read from s3 buckets to download latest application revision"
+
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": [
+              "s3:List*",
+              "s3:Get*"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::codedeploy.${var.profile=="dev"?"dev":"prod"}.trivedhaudurthi.me",
+                "arn:aws:s3:::codedeploy.${var.profile=="dev"?"dev":"prod"}.trivedhaudurthi.me/*"
+            ]
+        }
+    ]
+}
+EOF
+}
 resource "aws_iam_role" "ec2_instance_role" {
   name = "EC2-CSYE6225"
   assume_role_policy = <<EOF
@@ -264,7 +293,129 @@ resource "aws_iam_role_policy_attachment" "ec2_s3_attachment" {
   role       = aws_iam_role.ec2_instance_role.name
   policy_arn = aws_iam_policy.s3_iam_policy.arn
 }
+resource "aws_iam_role_policy_attachment" "ec2_s3_application" {
+  role       = aws_iam_role.ec2_instance_role.name
+  policy_arn = aws_iam_policy.codedeploy_agent_policy_ec2.arn
+}
 resource "aws_iam_instance_profile" "ec2_instance_profile" {
   name = "ec2_instance_profile"
   role = aws_iam_role.ec2_instance_role.name
+}
+resource "aws_codedeploy_app" "codedeploy_app" {
+  compute_platform = "Server"
+  name             = var.codedeploy_app
+}
+resource "aws_iam_role" "codedeploy_servicerole" {
+   name = "CodeDeployServiceRole"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "codedeploy.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+resource "aws_iam_role_policy_attachment" "attach_servicerole_codedeploy" {
+  role       = aws_iam_role.codedeploy_servicerole.name
+  policy_arn = var.AWSCodeDeployRole
+}
+resource "aws_codedeploy_deployment_group" "deployment_group" {
+  app_name  = aws_codedeploy_app.codedeploy_app.name
+  deployment_group_name = var.deploymentGroup["deployment_group_name"]
+  service_role_arn      = aws_iam_role.codedeploy_servicerole.arn
+  ec2_tag_set {
+    ec2_tag_filter {
+      key   = var.deploymentGroup["key1"]
+      type  = "KEY_AND_VALUE"
+      value = var.deploymentGroup["value1"]
+    }
+  }
+  deployment_config_name = var.deploymentGroup["deployment_config_name"] 
+  auto_rollback_configuration {
+    enabled = true
+    events  = [var.deploymentGroup["auto_rollback_events"]]
+  }
+}
+resource "aws_iam_user_policy" "gh_upload_to_s3" {
+  name        = "GH-Upload-To-S3"
+  user        = var.ghactions
+
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:Get*",
+                "s3:List*"
+            ],
+            "Resource": [
+                "arn:aws:s3:::codedeploy.${var.profile=="dev"?"dev":"prod"}.trivedhaudurthi.me",
+                "arn:aws:s3:::codedeploy.${var.profile=="dev"?"dev":"prod"}.trivedhaudurthi.me/*"
+            ]
+        }
+    ]
+}
+EOF
+}
+resource "aws_iam_user_policy" "gh_code_deploy" {
+  name        = "GH-Code-Deploy"
+  user        = var.ghactions
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:RegisterApplicationRevision",
+        "codedeploy:GetApplicationRevision"
+      ],
+      "Resource": [
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:application:${var.codedeploy_app}"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:CreateDeployment",
+        "codedeploy:GetDeployment"
+      ],
+      "Resource": [
+        "*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:GetDeploymentConfig"
+      ],
+      "Resource": [
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentconfig:CodeDeployDefault.OneAtATime",
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentconfig:CodeDeployDefault.HalfAtATime",
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentconfig:CodeDeployDefault.AllAtOnce"
+      ]
+    }
+  ]
+}
+EOF
+}
+resource "aws_route53_record" "ec2_record" {
+  zone_id = var.profile=="dev"?var.route53["dev_zone_id"]:var.route53["prod_zone_id"]
+  name    = var.route53["name"]
+  type    = "A"
+  ttl     = "60"
+  records = [aws_instance.web.public_ip]
 }

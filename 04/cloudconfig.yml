@@ -8,4 +8,5 @@ write_files:
       export s3_bucket_name="webapp.trivedh.audurthi"
       export DB_PORT="3306"
       export DATABASE="csye6225"
+      export PORT="5000"
     append: true
