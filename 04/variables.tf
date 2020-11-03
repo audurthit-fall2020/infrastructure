@@ -6,6 +6,7 @@ variable "vpc_cidr"{
     type=string
     default="172.31.0.0/16"
 }
+
 variable "subnet_cidr"{
     type=list
     default=[
@@ -58,7 +59,7 @@ variable "rds_instance"{
         "identifier"="csye6225-f20"
         "engine"="mysql"
         "engine_version"="5.7"
-        "instance_class"="db.t3.micro"
+        "instance_class"="db.t2.micro"
         "dbname"="csye6225"
         "username"="csye6225fall2020"
         "password"="Test1234"
@@ -82,5 +83,35 @@ variable "dynamoDB"{
         "name"="csye6225"
         "hash_key"="id"
         "hash_key_type"="S"
+    }
+}
+variable "AWSCodeDeployRole"{
+    type=string
+    default="arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole"
+}
+variable "deploymentGroup"{
+    type=map
+    default={
+        "deployment_group_name"="dev"
+        "key1"="Name"
+        "value1"="dev"
+        "deployment_config_name"="CodeDeployDefault.AllAtOnce"
+        "auto_rollback_events"="DEPLOYMENT_FAILURE"
+    }
+}
+variable "ghactions"{
+    type=string
+    default="ghactions_deploy"
+}
+variable "codedeploy_app"{
+    type=string
+    default="csye6225-webapp"
+}
+variable "route53"{
+    type=map
+    default={
+        "dev_zone_id"="Z05785683GYSFOVZG19DH"
+        "prod_zone_id"="Z06917591F8BU19ZH0VI8"
+        "name"="api"
     }
 }
