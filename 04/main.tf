@@ -394,7 +394,7 @@ resource "aws_iam_user_policy" "gh_code_deploy" {
         "codedeploy:GetDeployment"
       ],
       "Resource": [
-        "*"
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentgroup:${var.codedeploy_app}/${var.deploymentGroup["deployment_group_name"]}"
       ]
     },
     {
