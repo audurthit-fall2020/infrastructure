@@ -419,3 +419,7 @@ resource "aws_route53_record" "ec2_record" {
   ttl     = "60"
   records = [aws_instance.web.public_ip]
 }
+resource "aws_iam_role_policy_attachment" "ec2_cloudwatch_application" {
+  role       = aws_iam_role.ec2_instance_role.name
+  policy_arn = var.cloudwatch_policy
+}

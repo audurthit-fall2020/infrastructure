@@ -115,3 +115,7 @@ variable "route53"{
         "name"="api"
     }
 }
+variable "cloudwatch_policy"{
+    type=string
+    default="arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
