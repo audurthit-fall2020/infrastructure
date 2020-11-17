@@ -92,7 +92,9 @@ resource "aws_security_group" "application" {
     from_port   = var.appSgPorts["app"]
     to_port     = var.appSgPorts["app"]
     protocol    = "tcp"
-    cidr_blocks = [var.appSgCidr]
+    security_groups=[
+      aws_security_group.lb_sg.id
+    ]
   }
   ingress {
     description = "SSH"
@@ -332,13 +334,7 @@ resource "aws_codedeploy_deployment_group" "deployment_group" {
   app_name  = aws_codedeploy_app.codedeploy_app.name
   deployment_group_name = var.deploymentGroup["deployment_group_name"]
   service_role_arn      = aws_iam_role.codedeploy_servicerole.arn
-  ec2_tag_set {
-    ec2_tag_filter {
-      key   = var.deploymentGroup["key1"]
-      type  = "KEY_AND_VALUE"
-      value = var.deploymentGroup["value1"]
-    }
-  }
+  autoscaling_groups    = [aws_autoscaling_group.asg.arn]
   deployment_config_name = var.deploymentGroup["deployment_config_name"] 
   auto_rollback_configuration {
     enabled = true
@@ -415,11 +411,122 @@ EOF
 resource "aws_route53_record" "ec2_record" {
   zone_id = var.profile=="dev"?var.route53["dev_zone_id"]:var.route53["prod_zone_id"]
   name    = var.route53["name"]
-  type    = "A"
+  type    = "CNAME"
   ttl     = "60"
-  records = [aws_instance.web.public_ip]
+  records = [aws_lb.alb.dns_name]
 }
 resource "aws_iam_role_policy_attachment" "ec2_cloudwatch_application" {
   role       = aws_iam_role.ec2_instance_role.name
   policy_arn = var.cloudwatch_policy
+}
+resource "aws_launch_configuration" "lc_conf" {
+  name          = var.launch_config["name"]
+  image_id      = var.ami_id
+  instance_type = var.launch_config["instance_type"]
+  iam_instance_profile   = aws_iam_instance_profile.ec2_instance_profile.name
+  key_name     = var.launch_config["key_name"]
+  security_groups= [aws_security_group.application.id]
+  # enable_monitoring = var.launch_config["enable_monitoring"]
+  user_data              = data.template_file.cloud_init.rendered
+  associate_public_ip_address = var.launch_config["associate_public_ip_address"] 
+}
+resource "aws_autoscaling_group" "asg" {
+  max_size                  = var.asg["max"]
+  min_size                  = var.asg["min"]
+  desired_capacity          = var.asg["desired"]
+  launch_configuration      = aws_launch_configuration.lc_conf.name
+  vpc_zone_identifier       = [aws_subnet.sb1.id, aws_subnet.sb2.id,aws_subnet.sb3.id]
+  target_group_arns         = [aws_lb_target_group.alb_tg.arn]
+  tag {
+    key                 = "name"
+    value               = "dev"
+    propagate_at_launch = true
+  }
+}
+resource "aws_autoscaling_policy" "scaleup_policy" {
+  name                   = var.scaleup_policy["name"]
+  scaling_adjustment     = var.scaleup_policy["AdjustmentType"]
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = var.scaleup_policy["Cooldown"]
+  autoscaling_group_name = aws_autoscaling_group.asg.name
+}
+resource "aws_autoscaling_policy" "scaledown_policy" {
+  name                   = var.scaledown_policy["name"]
+  scaling_adjustment     = var.scaledown_policy["AdjustmentType"]
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = var.scaledown_policy["Cooldown"]
+  autoscaling_group_name = aws_autoscaling_group.asg.name
+}
+resource "aws_cloudwatch_metric_alarm" "high_alarm" {
+  alarm_name          = var.high_alarm["name"]
+  comparison_operator = var.high_alarm["comparisonOperator"]
+  evaluation_periods  = var.high_alarm["evaluationPeriods"]
+  metric_name         = var.high_alarm["metricName"]
+  namespace           = var.high_alarm["namespace"]
+  period              = var.high_alarm["period"]
+  statistic           = var.high_alarm["statistic"]
+  threshold           = var.high_alarm["threshold"]
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.asg.name
+  }
+  alarm_description = var.high_alarm["alarmDescription"]
+  alarm_actions     = [aws_autoscaling_policy.scaleup_policy.arn]
+}
+resource "aws_cloudwatch_metric_alarm" "low_alarm" {
+  alarm_name          = var.low_alarm["name"]
+  comparison_operator = var.low_alarm["comparisonOperator"]
+  evaluation_periods  = var.low_alarm["evaluationPeriods"]
+  metric_name         = var.low_alarm["metricName"]
+  namespace           = var.low_alarm["namespace"]
+  period              = var.low_alarm["period"]
+  statistic           = var.low_alarm["statistic"]
+  threshold           = var.low_alarm["threshold"]
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.asg.name
+  }
+  alarm_description = var.low_alarm["alarmDescription"]
+  alarm_actions     = [aws_autoscaling_policy.scaledown_policy.arn]
+}
+resource "aws_lb" "alb" {
+  internal           = var.alb["internal"]
+  load_balancer_type = var.alb["load_balancer_type"]
+  security_groups    = [aws_security_group.lb_sg.id]
+  subnets            = [aws_subnet.sb1.id,aws_subnet.sb2.id,aws_subnet.sb3.id]
+}
+resource "aws_security_group" "lb_sg" {
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.vpc.id
+
+  ingress {
+    description = "TLS"
+    from_port   = var.appSgPorts["tls"]
+    to_port     = var.appSgPorts["tls"]
+    protocol    = "tcp"
+    cidr_blocks = [var.appSgCidr]
+  }
+  ingress {
+    description = "Http"
+    from_port   = var.appSgPorts["http"]
+    to_port     = var.appSgPorts["http"]
+    protocol    = "tcp"
+    cidr_blocks = [var.appSgCidr]
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = {
+    Name = "loadBalancerSg"
+  }
+}
+resource "aws_lb_target_group" "alb_tg" {
+  port     = var.tg["port"]
+  protocol = var.tg["protocol"]
+  vpc_id   = aws_vpc.vpc.id
+  health_check {
+    path = "/api/v1/health"
+    matcher=200
+  }
 }

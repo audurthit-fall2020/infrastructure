@@ -119,3 +119,91 @@ variable "cloudwatch_policy"{
     type=string
     default="arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
+variable "launch_config"{
+    type=map
+    default={
+        "name"="asg_launch_config"
+        "instance_type"="t2.micro"
+        "key_name"="csye6225-dev"
+        "associate_public_ip_address"="true"
+        "enable_monitoring"="false"
+    }
+}
+variable "asg"{
+    type=map
+    default={
+        "cooldown"=60
+        "min"=3
+        "max"=5
+        "desired"=3
+    }
+}
+variable "scaleup_policy"{
+    type=map
+    default={
+      "name"="WebServerScaleUpPolicy"
+      "AdjustmentType"= "ChangeInCapacity"
+      "Cooldown"= "60",
+      "ScalingAdjustment"= "1"
+    }
+}
+variable "scaledown_policy"{
+    type=map
+    default={
+      "name"="WebServerScaleDownPolicy"
+      "AdjustmentType"= "ChangeInCapacity"
+      "Cooldown"= "60",
+      "ScalingAdjustment"= "-1"
+    }
+}
+variable "high_alarm"{
+    type=map
+    default={
+        "name"="CPUAlarmHigh"
+        "alarmDescription"= "Scale-up if CPU > 5% for 4 minutes"
+        "metricName"= "CPUUtilization"
+        "namespace"= "AWS/EC2"
+        "statistic"= "Average"
+        "period"= 120
+        "evaluationPeriods"= 2
+        "threshold"= 5
+        "comparisonOperator"= "GreaterThanThreshold"
+
+    }
+}
+variable "low_alarm"{
+    type=map
+    default={
+        "name"="CPUAlarmLow"
+        "alarmDescription"= "Scale-down if CPU <3% for 4 minutes"
+        "metricName"= "CPUUtilization"
+        "namespace"= "AWS/EC2"
+        "statistic"= "Average"
+        "period"= 120
+        "evaluationPeriods"= 2
+        "threshold"= 3
+        "comparisonOperator"= "LessThanThreshold"
+    }
+}
+variable "alb"{
+    type=map
+    default={
+        "load_balancer_type" = "application"
+        "internal"  = false
+    }
+}
+variable "tg"{
+    type=map
+    default={
+        "port"=5000
+        "protocol"="HTTP"
+    }
+}
+variable "listener"{
+    type=map
+    default={
+        "port"=80
+        protocol="HTTP"
+        
+    }
+}
