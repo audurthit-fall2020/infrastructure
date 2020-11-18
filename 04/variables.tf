@@ -113,6 +113,7 @@ variable "route53"{
         "dev_zone_id"="Z05785683GYSFOVZG19DH"
         "prod_zone_id"="Z06917591F8BU19ZH0VI8"
         "name"="api"
+        "type"="A"
     }
 }
 variable "cloudwatch_policy"{

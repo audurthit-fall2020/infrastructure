@@ -198,23 +198,6 @@ data "template_file" "cloud_init" {
     rds_hostname = aws_db_instance.rds.address
   }
 }
-resource "aws_instance" "web" {
-  ami                  = var.ami_id
-  instance_type        = var.ec2_instance["instance_type"]
-  key_name             = var.ec2_instance["key_name"]
-  root_block_device {
-    volume_size   = var.ec2_instance["volume_size"]
-    delete_on_termination= var.ec2_instance["delete_on_termination"]
-    volume_type   = var.ec2_instance["volume_type"]
-  }
-  vpc_security_group_ids = [aws_security_group.application.id]
-  subnet_id              = aws_subnet.sb3.id
-  user_data              = data.template_file.cloud_init.rendered
-  iam_instance_profile   = aws_iam_instance_profile.ec2_instance_profile.name
-  tags = {
-    Name = "dev"
-  }
-}
 resource "aws_dynamodb_table" "dynamoDB"{
   name       = var.dynamoDB["name"]
   hash_key   = var.dynamoDB["hash_key"]
@@ -334,8 +317,13 @@ resource "aws_codedeploy_deployment_group" "deployment_group" {
   app_name  = aws_codedeploy_app.codedeploy_app.name
   deployment_group_name = var.deploymentGroup["deployment_group_name"]
   service_role_arn      = aws_iam_role.codedeploy_servicerole.arn
-  autoscaling_groups    = [aws_autoscaling_group.asg.arn]
-  deployment_config_name = var.deploymentGroup["deployment_config_name"] 
+  autoscaling_groups    = [aws_autoscaling_group.asg.name]
+  deployment_config_name = var.deploymentGroup["deployment_config_name"]
+  load_balancer_info {
+    target_group_info { 
+      name= aws_lb_target_group.alb_tg.name
+      }
+  } 
   auto_rollback_configuration {
     enabled = true
     events  = [var.deploymentGroup["auto_rollback_events"]]
@@ -411,9 +399,12 @@ EOF
 resource "aws_route53_record" "ec2_record" {
   zone_id = var.profile=="dev"?var.route53["dev_zone_id"]:var.route53["prod_zone_id"]
   name    = var.route53["name"]
-  type    = "CNAME"
-  ttl     = "60"
-  records = [aws_lb.alb.dns_name]
+  type    = var.route53["type"]
+  alias {
+    name                   = aws_lb.alb.dns_name
+    zone_id                = aws_lb.alb.zone_id
+    evaluate_target_health = true
+  }
 }
 resource "aws_iam_role_policy_attachment" "ec2_cloudwatch_application" {
   role       = aws_iam_role.ec2_instance_role.name
@@ -445,15 +436,15 @@ resource "aws_autoscaling_group" "asg" {
 }
 resource "aws_autoscaling_policy" "scaleup_policy" {
   name                   = var.scaleup_policy["name"]
-  scaling_adjustment     = var.scaleup_policy["AdjustmentType"]
-  adjustment_type        = "ChangeInCapacity"
+  scaling_adjustment     = var.scaleup_policy["ScalingAdjustment"]
+  adjustment_type        = var.scaleup_policy["AdjustmentType"]
   cooldown               = var.scaleup_policy["Cooldown"]
   autoscaling_group_name = aws_autoscaling_group.asg.name
 }
 resource "aws_autoscaling_policy" "scaledown_policy" {
   name                   = var.scaledown_policy["name"]
-  scaling_adjustment     = var.scaledown_policy["AdjustmentType"]
-  adjustment_type        = "ChangeInCapacity"
+  scaling_adjustment     = var.scaledown_policy["ScalingAdjustment"]
+  adjustment_type        = var.scaledown_policy["AdjustmentType"]
   cooldown               = var.scaledown_policy["Cooldown"]
   autoscaling_group_name = aws_autoscaling_group.asg.name
 }
@@ -526,7 +517,16 @@ resource "aws_lb_target_group" "alb_tg" {
   protocol = var.tg["protocol"]
   vpc_id   = aws_vpc.vpc.id
   health_check {
-    path = "/api/v1/health"
+    path = "/v1/health"
     matcher=200
+  }
+}
+resource "aws_lb_listener" "front_end" {
+  load_balancer_arn = aws_lb.alb.arn
+  port              = var.listener["port"]
+  protocol          = var.listener["protocol"]
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.alb_tg.arn
   }
 }
