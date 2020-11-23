@@ -290,7 +290,30 @@ resource "aws_codedeploy_app" "codedeploy_app" {
   compute_platform = "Server"
   name             = var.codedeploy_app
 }
+resource "aws_codedeploy_app" "codedeploy_lambda" {
+  compute_platform = "Lambda"
+  name             = var.codedeploy_lambda
+}
 resource "aws_iam_role" "codedeploy_servicerole" {
+   name = "CodeDeployServiceRole"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "codedeploy.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+resource "aws_iam_role" "codedeploy_servicerole_lambda" {
    name = "CodeDeployServiceRole"
 
   assume_role_policy = <<EOF
@@ -313,6 +336,10 @@ resource "aws_iam_role_policy_attachment" "attach_servicerole_codedeploy" {
   role       = aws_iam_role.codedeploy_servicerole.name
   policy_arn = var.AWSCodeDeployRole
 }
+resource "aws_iam_policy_attachment" "attach_servicerole_lambda_codedeploy" {
+  role       = aws_iam_role.codedeploy_servicerole_lambda.name
+  policy_arn = var.AWSCodeDeployLambdaPolicy
+}
 resource "aws_codedeploy_deployment_group" "deployment_group" {
   app_name  = aws_codedeploy_app.codedeploy_app.name
   deployment_group_name = var.deploymentGroup["deployment_group_name"]
@@ -329,9 +356,49 @@ resource "aws_codedeploy_deployment_group" "deployment_group" {
     events  = [var.deploymentGroup["auto_rollback_events"]]
   }
 }
+resource "aws_codedeploy_deployment_group" "deployment_group_lambda" {
+  app_name  = aws_codedeploy_app.codedeploy_lambda.name
+  deployment_group_name = var.deploymentGroupLamda["deployment_group_name"]
+  service_role_arn      = aws_iam_role.codedeploy_servicerole_lambda.arn
+  autoscaling_groups    = [aws_autoscaling_group.asg.name]
+  deployment_config_name = var.deploymentGroup["deployment_config_name"]
+  load_balancer_info {
+    target_group_info { 
+      name= aws_lb_target_group.alb_tg.name
+      }
+  } 
+  auto_rollback_configuration {
+    enabled = true
+    events  = [var.deploymentGroup["auto_rollback_events"]]
+  }
+}
 resource "aws_iam_user_policy" "gh_upload_to_s3" {
   name        = "GH-Upload-To-S3"
   user        = var.ghactions
+
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:Get*",
+                "s3:List*"
+            ],
+            "Resource": [
+                "arn:aws:s3:::codedeploy.${var.profile=="dev"?"dev":"prod"}.trivedhaudurthi.me",
+                "arn:aws:s3:::codedeploy.${var.profile=="dev"?"dev":"prod"}.trivedhaudurthi.me/*"
+            ]
+        }
+    ]
+}
+EOF
+}
+resource "aws_iam_user_policy" "gh_upload_to_s3_lambda" {
+  name        = "GH-Upload-To-S3_Lambda"
+  user        = var.ghactions_lambda
 
   policy = <<EOF
 {
@@ -390,6 +457,47 @@ resource "aws_iam_user_policy" "gh_code_deploy" {
         "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentconfig:CodeDeployDefault.OneAtATime",
         "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentconfig:CodeDeployDefault.HalfAtATime",
         "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentconfig:CodeDeployDefault.AllAtOnce"
+      ]
+    }
+  ]
+}
+EOF
+}
+resource "aws_iam_user_policy" "gh_code_deploy_lambda" {
+  name        = "GH-Code-Deploy_Lambda"
+  user        = var.ghactions_lambda
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:RegisterApplicationRevision",
+        "codedeploy:GetApplicationRevision"
+      ],
+      "Resource": [
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:application:${var.codedeploy_lambda}"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:CreateDeployment",
+        "codedeploy:GetDeployment"
+      ],
+      "Resource": [
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentgroup:${var.codedeploy_lambda}/${var.deploymentGroupLambda["deployment_group_name"]}"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:GetDeploymentConfig"
+      ],
+      "Resource": [
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentconfig:CodeDeployDefault.LambdaAllAtOnce"
       ]
     }
   ]
