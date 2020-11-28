@@ -81,13 +81,6 @@ resource "aws_security_group" "application" {
   vpc_id      = aws_vpc.vpc.id
 
   ingress {
-    description = "TLS"
-    from_port   = var.appSgPorts["tls"]
-    to_port     = var.appSgPorts["tls"]
-    protocol    = "tcp"
-    cidr_blocks = [var.appSgCidr]
-  }
-  ingress {
     description = "application port"
     from_port   = var.appSgPorts["app"]
     to_port     = var.appSgPorts["app"]
@@ -100,13 +93,6 @@ resource "aws_security_group" "application" {
     description = "SSH"
     from_port   = var.appSgPorts["ssh"]
     to_port     = var.appSgPorts["ssh"]
-    protocol    = "tcp"
-    cidr_blocks = [var.appSgCidr]
-  }
-  ingress {
-    description = "Http"
-    from_port   = var.appSgPorts["http"]
-    to_port     = var.appSgPorts["http"]
     protocol    = "tcp"
     cidr_blocks = [var.appSgCidr]
   }
@@ -196,6 +182,8 @@ data "template_file" "cloud_init" {
   template = file("${path.module}/cloudconfig.yml")
   vars = {
     rds_hostname = aws_db_instance.rds.address
+    topic        = aws_sns_topic.sns_topic.arn
+    region       = var.region
   }
 }
 resource "aws_dynamodb_table" "dynamoDB"{
@@ -274,6 +262,27 @@ resource "aws_iam_role" "ec2_instance_role" {
     }
 EOF
 }
+resource "aws_iam_policy" "ec2_sns_policy" {
+  name        = "ec2_sns_policy"
+  path        = "/"
+  description = "Enables EC2 to publish message to sns"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Stmt1606518220661",
+      "Action": [
+        "sns:Publish"
+      ],
+      "Effect": "Allow",
+      "Resource": "${aws_sns_topic.sns_topic.arn}"
+    }
+  ]
+}
+EOF
+}
 resource "aws_iam_role_policy_attachment" "ec2_s3_attachment" {
   role       = aws_iam_role.ec2_instance_role.name
   policy_arn = aws_iam_policy.s3_iam_policy.arn
@@ -281,6 +290,10 @@ resource "aws_iam_role_policy_attachment" "ec2_s3_attachment" {
 resource "aws_iam_role_policy_attachment" "ec2_s3_application" {
   role       = aws_iam_role.ec2_instance_role.name
   policy_arn = aws_iam_policy.codedeploy_agent_policy_ec2.arn
+}
+resource "aws_iam_role_policy_attachment" "ec2_sns_attachment" {
+  role       = aws_iam_role.ec2_instance_role.name
+  policy_arn = aws_iam_policy.ec2_sns_policy.arn
 }
 resource "aws_iam_instance_profile" "ec2_instance_profile" {
   name = "ec2_instance_profile"
@@ -290,8 +303,31 @@ resource "aws_codedeploy_app" "codedeploy_app" {
   compute_platform = "Server"
   name             = var.codedeploy_app
 }
+resource "aws_codedeploy_app" "codedeploy_lambda" {
+  compute_platform = "Lambda"
+  name             = var.codedeploy_lambda
+}
 resource "aws_iam_role" "codedeploy_servicerole" {
    name = "CodeDeployServiceRole"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "codedeploy.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+resource "aws_iam_role" "codedeploy_servicerole_lambda" {
+   name = "CodeDeployServiceRoleLambda"
 
   assume_role_policy = <<EOF
 {
@@ -313,6 +349,51 @@ resource "aws_iam_role_policy_attachment" "attach_servicerole_codedeploy" {
   role       = aws_iam_role.codedeploy_servicerole.name
   policy_arn = var.AWSCodeDeployRole
 }
+resource "aws_iam_policy" "codedeploy_lambda_policy" {
+  name        = "codedeploy_lambda_policy"
+  description = "Provides codedeploy permissions to deploy Lambda"
+
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": [
+                "cloudwatch:DescribeAlarms",
+                "lambda:UpdateAlias",
+                "lambda:GetAlias",
+                "lambda:GetProvisionedConcurrencyConfig"
+            ],
+            "Resource": "*",
+            "Effect": "Allow"
+        },
+        {
+            "Action": [
+                "s3:PutObject",
+                "s3:Get*",
+                "s3:List*"
+            ],
+            "Resource": [
+                "arn:aws:s3:::codedeploy.${var.profile=="dev"?"dev":"prod"}.trivedhaudurthi.me",
+                "arn:aws:s3:::codedeploy.${var.profile=="dev"?"dev":"prod"}.trivedhaudurthi.me/*"
+            ],
+            "Effect":"Allow"
+        },
+        {
+            "Action": [
+                "lambda:InvokeFunction"
+            ],
+            "Resource": "arn:aws:lambda:*:*:function:CodeDeployHook_*",
+            "Effect": "Allow"
+        }
+    ]
+}
+EOF
+}
+resource "aws_iam_role_policy_attachment" "attach_servicerole_lambda_codedeploy" {
+  role       = aws_iam_role.codedeploy_servicerole_lambda.name
+  policy_arn = aws_iam_policy.codedeploy_lambda_policy.arn
+}
 resource "aws_codedeploy_deployment_group" "deployment_group" {
   app_name  = aws_codedeploy_app.codedeploy_app.name
   deployment_group_name = var.deploymentGroup["deployment_group_name"]
@@ -329,9 +410,187 @@ resource "aws_codedeploy_deployment_group" "deployment_group" {
     events  = [var.deploymentGroup["auto_rollback_events"]]
   }
 }
+resource "aws_codedeploy_deployment_group" "deployment_group_lambda" {
+  app_name  = aws_codedeploy_app.codedeploy_lambda.name
+  deployment_group_name = var.deploymentGroupLambda["deployment_group_name"]
+  service_role_arn      = aws_iam_role.codedeploy_servicerole_lambda.arn
+  deployment_config_name = var.deploymentGroupLambda["deployment_config_name"]
+  deployment_style {
+    deployment_option = "WITH_TRAFFIC_CONTROL"
+    deployment_type   = "BLUE_GREEN"
+  }
+}
+resource "aws_iam_role" "lambda_exec_role" {
+  name = "iam_for_lambda"
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+resource "aws_iam_policy" "lambda_policy" {
+  name        = "lambda_policy"
+  description = "Provieds lambda funtion permission to get access SES,DynamoDB and Cloudwatch"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+          {
+          "Effect": "Allow",
+          "Action": [
+              "logs:CreateLogGroup",
+              "logs:CreateLogStream",
+              "logs:PutLogEvents"
+          ],
+          "Resource": [
+            "arn:aws:logs:us-east-1:488753017811:*",
+            "arn:aws:logs:us-east-1:488753017811:log-group:/aws/lambda/${var.lambda["function_name"]}:*"
+          ]
+      },
+      {
+      "Sid": "Stmt1606502279390",
+      "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:DescribeLimits",
+        "dynamodb:GetItem",
+        "dynamodb:GetRecords",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:UpdateItem"
+      ],
+      "Effect": "Allow",
+      "Resource":"${aws_dynamodb_table.dynamoDB.arn}"
+    },
+    {
+      "Sid": "Stmt1606509728742",
+      "Action": [
+        "ses:SendEmail",
+        "ses:SendRawEmail",
+        "ses:SendTemplatedEmail"
+      ],
+      "Effect": "Allow",
+      "Resource": "arn:aws:ses:${var.region}:${var.account_id}:identity/${var.profile}.trivedhaudurthi.me"
+    }
+  ]
+}
+EOF
+}
+resource "aws_iam_role_policy_attachment" "attach_lambda_policy" {
+  role       = aws_iam_role.lambda_exec_role.name
+  policy_arn = aws_iam_policy.lambda_policy.arn
+}
+resource "aws_lambda_function" "lambda" {
+  filename = var.lambda["filename"]
+  function_name = var.lambda["function_name"]
+  handler = var.lambda["handler"]
+  role    = aws_iam_role.lambda_exec_role.arn
+  runtime = var.lambda["runtime"]
+  timeout = var.lambda["timeout"]
+  reserved_concurrent_executions = var.lambda["reserved_concurrent_executions"]
+  publish = var.lambda["publish"]
+  source_code_hash = filebase64sha256(var.lambda["filename"])
+  environment {
+    variables = {
+      "table" = aws_dynamodb_table.dynamoDB.id,
+      "account"= var.profile
+    }
+  }
+}
+
+resource "aws_lambda_alias" "lambda_alias" {
+  name = var.lambda_alias["name"]
+  description = var.lambda_alias["description"]
+  function_name = aws_lambda_function.lambda.arn
+  function_version = aws_lambda_function.lambda.version
+}
+resource "aws_sns_topic" "sns_topic" {
+  name = var.sns_topic["name"]
+}
+data "aws_iam_policy_document" "sns_access_policy" {
+  policy_id = "__default_policy_ID"
+  statement {
+    sid = "__default_statement_ID"
+    actions = [ "SNS:GetTopicAttributes",
+        "SNS:SetTopicAttributes",
+        "SNS:AddPermission",
+        "SNS:RemovePermission",
+        "SNS:DeleteTopic",
+        "SNS:Subscribe",
+        "SNS:ListSubscriptionsByTopic",
+        "SNS:Publish",
+        "SNS:Receive" ]
+    effect = "Allow"
+    principals {
+       type = "AWS"
+       identifiers = [ "*" ]
+    }
+    resources = [ "arn:aws:sns:${var.region}:${var.account_id}:${var.sns_topic["name"]}" ]
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceOwner"
+
+      values = [
+        var.account_id,
+      ]
+    }
+  }
+}
+resource "aws_sns_topic_policy" "attach_sns_access_policy" {
+  arn = aws_sns_topic.sns_topic.arn
+  policy = data.aws_iam_policy_document.sns_access_policy.json
+}
+resource "aws_sns_topic_subscription" "sns_lambda_sub" {
+  topic_arn = aws_sns_topic.sns_topic.arn
+  protocol  = "lambda"
+  endpoint  = "${aws_lambda_function.lambda.arn}:${var.lambda_alias["name"]}"
+}
+resource "aws_lambda_permission" "lambda_sns_res_stmt" {
+  statement_id  = "AllowExecutionFromSNS"
+  action        = "lambda:InvokeFunction"
+  function_name = var.lambda["function_name"]
+  qualifier     = aws_lambda_alias.lambda_alias.name
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.sns_topic.arn
+}
 resource "aws_iam_user_policy" "gh_upload_to_s3" {
   name        = "GH-Upload-To-S3"
   user        = var.ghactions
+
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:Get*",
+                "s3:List*"
+            ],
+            "Resource": [
+                "arn:aws:s3:::codedeploy.${var.profile=="dev"?"dev":"prod"}.trivedhaudurthi.me",
+                "arn:aws:s3:::codedeploy.${var.profile=="dev"?"dev":"prod"}.trivedhaudurthi.me/*"
+            ]
+        }
+    ]
+}
+EOF
+}
+resource "aws_iam_user_policy" "gh_upload_to_s3_lambda" {
+  name        = "GH-Upload-To-S3_Lambda"
+  user        = var.ghactions_lambda
 
   policy = <<EOF
 {
@@ -391,6 +650,58 @@ resource "aws_iam_user_policy" "gh_code_deploy" {
         "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentconfig:CodeDeployDefault.HalfAtATime",
         "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentconfig:CodeDeployDefault.AllAtOnce"
       ]
+    }
+  ]
+}
+EOF
+}
+resource "aws_iam_user_policy" "gh_code_deploy_lambda" {
+  name        = "GH-Code-Deploy_Lambda"
+  user        = var.ghactions_lambda
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:RegisterApplicationRevision",
+        "codedeploy:GetApplicationRevision"
+      ],
+      "Resource": [
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:application:${var.codedeploy_lambda}"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:CreateDeployment",
+        "codedeploy:GetDeployment"
+      ],
+      "Resource": [
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentgroup:${var.codedeploy_lambda}/${var.deploymentGroupLambda["deployment_group_name"]}"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:GetDeploymentConfig"
+      ],
+      "Resource": [
+        "arn:aws:codedeploy:${var.region}:${var.account_id}:deploymentconfig:CodeDeployDefault.LambdaAllAtOnce"
+      ]
+    },
+    {
+      "Action": [
+        "lambda:GetAlias",
+        "lambda:GetFunction",
+        "lambda:PublishVersion",
+        "lambda:UpdateAlias",
+        "lambda:UpdateFunctionCode"
+      ],
+      "Effect": "Allow",
+      "Resource": "${aws_lambda_function.lambda.arn}"
     }
   ]
 }
