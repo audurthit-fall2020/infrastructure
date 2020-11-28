@@ -9,4 +9,6 @@ write_files:
       export DB_PORT="3306"
       export DATABASE="csye6225"
       export PORT="5000"
+      export sns_topic=${topic}
+      export AWS_REGION=${region}
     append: true
