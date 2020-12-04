@@ -174,6 +174,7 @@ resource "aws_db_instance" "rds" {
   name                 = var.rds_instance["dbname"]
   username             = var.rds_instance["username"]
   password             = var.rds_instance["password"]
+  storage_encrypted    = var.rds_instance["storage_encrypted"]
   db_subnet_group_name = aws_db_subnet_group.db_subnet_grp.id
   vpc_security_group_ids = [aws_security_group.database.id]
   skip_final_snapshot  = var.rds_instance["skip_final_snapshot"]
