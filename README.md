@@ -11,4 +11,6 @@ Navigate to 04 directory and run following commands
 - Create Resources  
 `terraform apply`  
 - Destroy Resources  
-`terraform destory`  
+`terraform destory`
+- ACM import ssl certificate  
+`aws acm import-certificate  --certificate fileb://~/Masters/ssl/prod_trivedhaudurthi_me.crt --private-key fileb://~/Masters/ssl/private.pem --certificate-chain fileb://~/Masters/ssl/prod_trivedhaudurthi_me.ca-bundle --profile prod `  
