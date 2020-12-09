@@ -174,6 +174,7 @@ resource "aws_db_instance" "rds" {
   name                 = var.rds_instance["dbname"]
   username             = var.rds_instance["username"]
   password             = var.rds_instance["password"]
+  storage_encrypted    = var.rds_instance["storage_encrypted"]
   db_subnet_group_name = aws_db_subnet_group.db_subnet_grp.id
   vpc_security_group_ids = [aws_security_group.database.id]
   skip_final_snapshot  = var.rds_instance["skip_final_snapshot"]
@@ -836,6 +837,8 @@ resource "aws_lb_listener" "front_end" {
   load_balancer_arn = aws_lb.alb.arn
   port              = var.listener["port"]
   protocol          = var.listener["protocol"]
+  ssl_policy        = var.listener["ssl_policy"]
+  certificate_arn   = var.listener["certificate_arn"] 
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.alb_tg.arn
