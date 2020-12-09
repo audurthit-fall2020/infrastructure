@@ -132,6 +132,16 @@ resource "aws_security_group" "database" {
     Name = "application"
   }
 }
+resource "aws_db_parameter_group" "rds_pg" {
+  name   = "rds-pg"
+  family = "mysql5.7"
+
+  parameter {
+    name  = "performance_schema"
+    value = 1
+    apply_method = "pending-reboot"
+  }
+}
 resource "aws_s3_bucket" "bucket" {
   bucket = "webapp.trivedh.audurthi"
   force_destroy=true
@@ -178,6 +188,7 @@ resource "aws_db_instance" "rds" {
   db_subnet_group_name = aws_db_subnet_group.db_subnet_grp.id
   vpc_security_group_ids = [aws_security_group.database.id]
   skip_final_snapshot  = var.rds_instance["skip_final_snapshot"]
+  parameter_group_name = aws_db_parameter_group.rds_pg.id
 }
 data "template_file" "cloud_init" {
   template = file("${path.module}/cloudconfig.yml")
